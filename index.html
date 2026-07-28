@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Roma 2040 — Rete dei trasporti</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #000000;
+    --panel: rgba(28,28,30,0.86);
+    --panel-solid: #1C1C1E;
+    --ink: #F2F2F4;
+    --ink-soft: #9A9AA0;
+    --line: rgba(255,255,255,0.09);
+    --accent: #3B9CFF;
+    --accent-glow: rgba(59,156,255,0.35);
+    --radius: 18px;
+    --shadow: 0 12px 34px rgba(0,0,0,0.55);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;font-family:'Inter',sans-serif;color:var(--ink);background:var(--bg);overflow:hidden;}
+  #map{position:absolute;top:0;left:0;right:0;bottom:0;background:#08090B;}
+
+  /* Dark tile tuning: punchier contrast, glow-friendly */
+  .leaflet-tile-pane{filter:brightness(1.04) contrast(1.08) saturate(1.15);}
+  .leaflet-control-attribution{background:rgba(0,0,0,0.5) !important; color:#888 !important;}
+  .leaflet-control-attribution a{color:#aaa !important;}
+
+  /* ---------- Top brand pill ---------- */
+  .brand{
+    position:absolute; top:max(14px, env(safe-area-inset-top)); left:14px; right:14px; z-index:1000;
+    background:var(--panel); backdrop-filter:blur(20px) saturate(1.4); -webkit-backdrop-filter:blur(20px) saturate(1.4);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:18px; box-shadow:var(--shadow);
+    padding:11px 16px; display:flex; align-items:center; gap:10px;
+  }
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent); box-shadow:0 0 10px 2px var(--accent-glow);}
+  .brand h1{font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:18px; margin:0; line-height:1.1;}
+  .brand span{display:block; font-size:11px; color:var(--ink-soft); font-weight:500; margin-top:1px;}
+  .brand .menu-btn{
+    margin-left:auto; width:34px; height:34px; border-radius:11px; border:none;
+    background:rgba(255,255,255,0.08); color:var(--ink); font-size:16px; display:flex;
+    align-items:center; justify-content:center; cursor:pointer;
+  }
+  .brand .menu-btn:active{background:rgba(255,255,255,0.16);}
+
+  /* ---------- Bottom sheet ---------- */
+  .sheet-backdrop{
+    position:absolute; inset:0; z-index:1100; background:rgba(0,0,0,0.45);
+    opacity:0; pointer-events:none; transition:opacity .25s;
+  }
+  .sheet-backdrop.open{opacity:1; pointer-events:auto;}
+
+  .sheet{
+    position:absolute; left:0; right:0; bottom:0; z-index:1200;
+    background:var(--panel-solid); border-top-left-radius:22px; border-top-right-radius:22px;
+    box-shadow:0 -10px 40px rgba(0,0,0,0.6);
+    transform:translateY(100%); transition:transform .28s cubic-bezier(.32,.72,0,1);
+    max-height:78vh; display:flex; flex-direction:column;
+    padding-bottom:env(safe-area-inset-bottom);
+    border:1px solid rgba(255,255,255,0.07);
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:36px; height:5px; border-radius:3px; background:rgba(255,255,255,0.25); margin:10px auto 6px;}
+  .sheet-scroll{overflow-y:auto; padding:4px 18px 18px;}
+
+  .section{padding:14px 0; border-bottom:1px solid var(--line);}
+  .section:last-child{border-bottom:none;}
+  .panel-label{
+    font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12.5px;
+    text-transform:uppercase; letter-spacing:0.7px; color:var(--ink-soft); margin:0 0 12px 0;
+  }
+
+  .toggle-row{display:flex; align-items:center; justify-content:space-between; padding:7px 0;}
+  .toggle-row .name{font-size:15px; font-weight:600;}
+  .switch{position:relative; width:42px; height:25px; flex-shrink:0;}
+  .switch input{opacity:0; width:0; height:0;}
+  .slider{position:absolute; cursor:pointer; inset:0; background:rgba(255,255,255,0.16); border-radius:25px; transition:.2s;}
+  .slider:before{position:absolute; content:""; height:21px; width:21px; left:2px; top:2px; background:white; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,0.4);}
+  input:checked + .slider{background:var(--accent); box-shadow:0 0 10px var(--accent-glow);}
+  input:checked + .slider:before{transform:translateX(17px);}
+
+  .line-chip{
+    display:flex; align-items:center; gap:10px; padding:10px 8px; border-radius:12px;
+    cursor:pointer; transition:background .15s;
+  }
+  .line-chip:active{background:rgba(255,255,255,0.06);}
+  .line-chip.active{background:rgba(59,156,255,0.14);}
+  .chip-swatch{width:14px; height:14px; border-radius:50%; flex-shrink:0; box-shadow:0 0 8px 1px currentColor;}
+  .chip-name{font-size:14.5px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .chip-count{font-size:11.5px; color:var(--ink-soft); font-weight:500;}
+  .chip-del{
+    width:26px;height:26px;border-radius:8px;border:none;background:transparent;color:#FF6B5E;
+    font-size:15px; cursor:pointer; display:flex;align-items:center;justify-content:center; flex-shrink:0;
+  }
+  .chip-del:active{background:rgba(255,107,94,0.15);}
+
+  .btn{
+    width:100%; padding:13px 14px; border-radius:14px; border:none; cursor:pointer;
+    font-family:'Inter',sans-serif; font-weight:600; font-size:15px; transition:filter .15s, background .15s;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn-primary{background:var(--accent); color:white; box-shadow:0 4px 16px var(--accent-glow);}
+  .btn-primary:active{filter:brightness(1.1);}
+  .btn-primary.drawing{background:#FF453A; box-shadow:0 4px 16px rgba(255,69,58,0.35);}
+  .btn-ghost{background:rgba(255,255,255,0.08); color:var(--ink); margin-top:10px;}
+  .btn-ghost:active{background:rgba(255,255,255,0.14);}
+
+  .hint{font-size:12.5px; color:var(--ink-soft); line-height:1.55; margin:10px 0 0 0;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:5px;}
+  .field input[type=text]{
+    width:100%; padding:10px 12px; border-radius:11px; border:1px solid rgba(255,255,255,0.1);
+    font-family:'Inter',sans-serif; font-size:14.5px; color:var(--ink); background:rgba(255,255,255,0.06);
+  }
+  .field input[type=text]:focus{outline:none; border-color:var(--accent);}
+  .swatches{display:flex; gap:8px; flex-wrap:wrap;}
+  .swatch-opt{
+    width:28px; height:28px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    box-shadow:0 0 6px 1px currentColor;
+  }
+  .swatch-opt.selected{border-color:#fff; transform:scale(1.12);}
+
+  /* ---------- Floating action buttons (always visible) ---------- */
+  .fab-stack{
+    position:absolute; right:14px; bottom:max(18px, env(safe-area-inset-bottom)); z-index:1000;
+    display:flex; flex-direction:column; gap:10px; align-items:flex-end;
+  }
+  .fab{
+    background:var(--panel); backdrop-filter:blur(20px) saturate(1.4); -webkit-backdrop-filter:blur(20px) saturate(1.4);
+    border:1px solid rgba(255,255,255,0.08); box-shadow:var(--shadow); border-radius:16px;
+    color:var(--ink); font-weight:600; font-size:14px; padding:13px 18px; display:flex; align-items:center; gap:8px;
+  }
+  .fab.primary{background:var(--accent); border-color:transparent; box-shadow:0 4px 18px var(--accent-glow);}
+  .fab.primary.drawing{background:#FF453A; box-shadow:0 4px 18px rgba(255,69,58,0.4);}
+  .fab.small{padding:11px 13px; font-size:18px; line-height:1;}
+
+  .zoom-stack{
+    position:absolute; left:14px; bottom:max(18px, env(safe-area-inset-bottom)); z-index:1000;
+    background:var(--panel); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:14px; overflow:hidden; box-shadow:var(--shadow);
+  }
+  .zoom-stack button{
+    display:block; width:42px; height:42px; border:none; background:transparent; color:var(--ink);
+    font-size:19px; font-weight:600; cursor:pointer;
+  }
+  .zoom-stack button:first-child{border-bottom:1px solid rgba(255,255,255,0.1);}
+  .zoom-stack button:active{background:rgba(255,255,255,0.1);}
+
+  /* ---------- Drawing banner ---------- */
+  .draw-banner{
+    position:absolute; top:max(72px, calc(env(safe-area-inset-top) + 64px)); left:50%; transform:translateX(-50%); z-index:1001;
+    background:rgba(28,28,30,0.92); backdrop-filter:blur(16px); color:white; padding:10px 16px; border-radius:30px;
+    font-size:13px; font-weight:600; box-shadow:var(--shadow); display:none;
+    align-items:center; gap:10px; border:1px solid rgba(255,255,255,0.08); white-space:nowrap;
+  }
+  .draw-banner.show{display:flex;}
+  .draw-banner .pulse{width:8px;height:8px;border-radius:50%;background:#FF453A; box-shadow:0 0 8px 2px rgba(255,69,58,0.6); animation:pulse 1.2s infinite; flex-shrink:0;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,69,58,0.6);}70%{box-shadow:0 0 0 8px rgba(255,69,58,0);}100%{box-shadow:0 0 0 0 rgba(255,69,58,0);}}
+  .draw-banner button{
+    background:rgba(255,255,255,0.15); border:none; color:white; border-radius:14px;
+    padding:5px 11px; font-size:12px; font-weight:600; cursor:pointer; flex-shrink:0;
+  }
+  .draw-banner button:active{background:rgba(255,255,255,0.28);}
+
+  @keyframes popIn{0%{transform:scale(0);}60%{transform:scale(1.4);}100%{transform:scale(1);}}
+  .station-marker{animation:popIn .35s ease-out;}
+
+  .leaflet-popup-content-wrapper{
+    background:rgba(28,28,30,0.92); backdrop-filter:blur(16px); border-radius:14px; box-shadow:var(--shadow);
+    border:1px solid rgba(255,255,255,0.08); color:var(--ink);
+  }
+  .leaflet-popup-tip{background:rgba(28,28,30,0.92);}
+  .leaflet-popup-content{font-family:'Inter',sans-serif; margin:10px 13px; font-size:13px;}
+  .popup-title{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:15px; margin-bottom:2px; color:var(--ink);}
+  .popup-sub{color:var(--ink-soft); font-size:11.5px;}
+  .leaflet-popup-close-button{color:var(--ink-soft) !important;}
+
+  .leaflet-tooltip{
+    background:rgba(28,28,30,0.92); color:var(--ink); border:1px solid rgba(255,255,255,0.1);
+    border-radius:8px; font-family:'Inter',sans-serif; font-weight:600; font-size:12px;
+    box-shadow:var(--shadow);
+  }
+  .leaflet-tooltip-top:before{border-top-color:rgba(28,28,30,0.92);}
+
+  /* etichette inline sulle linee */
+  .line-label{ background:transparent !important; border:none !important; box-shadow:none !important; }
+  .line-label::before{ display:none !important; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="brand">
+  <div class="dot"></div>
+  <div>
+    <h1>Roma 2040</h1>
+    <span>Rete dei trasporti</span>
+  </div>
+  <button class="menu-btn" id="openSheetBtn">☰</button>
+</div>
+
+<div class="draw-banner" id="drawBanner">
+  <span class="pulse"></span>
+  <span id="drawBannerText">Tocca la mappa per aggiungere stazioni</span>
+  <button id="finishDrawBtn">Fine</button>
+</div>
+
+<div class="zoom-stack">
+  <button id="zoomIn">+</button>
+  <button id="zoomOut">−</button>
+</div>
+
+<div class="fab-stack">
+  <button class="fab primary" id="newLineBtn">+ Nuova linea</button>
+</div>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-scroll">
+
+    <div class="section">
+      <p class="panel-label">Strati</p>
+      <div class="toggle-row">
+        <span class="name">Linee esistenti</span>
+        <label class="switch"><input type="checkbox" id="toggleExisting" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="name">Linee future</span>
+        <label class="switch"><input type="checkbox" id="toggleFuture" checked><span class="slider"></span></label>
+      </div>
+    </div>
+
+    <div class="section">
+      <p class="panel-label">Le tue linee future</p>
+      <div id="lineList"></div>
+      <p class="hint" id="emptyHint">Tocca "+ Nuova linea" sulla mappa per iniziare a disegnare.</p>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+/* ================= MAP SETUP ================= */
+const map = L.map('map', { zoomControl:false, attributionControl:true }).setView([41.9028, 12.4964], 13);
+
+L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png', {
+  maxZoom: 20,
+  attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+}).addTo(map);
+
+document.getElementById('zoomIn').addEventListener('click', ()=>map.zoomIn());
+document.getElementById('zoomOut').addEventListener('click', ()=>map.zoomOut());
+
+/* ================= EXISTING LINES (Roma metro + tram + ferrovia) ================= */
+const existingLines = [
+  {
+    name:'Metro A', label:'Metro', color:'#FF8000', weight:7,
+    stations:[
+      ['Battistini',41.9168,12.4221],['Cornelia',41.9090,12.4308],['Baldo degli Ubaldi',41.9089,12.4391],
+      ['Valle Aurelia',41.9069,12.4453],['Cipro',41.9051,12.4514],['Ottaviano',41.9043,12.4575],
+      ['Lepanto',41.9082,12.4669],['Flaminio',41.9119,12.4763],['Spagna',41.9058,12.4823],
+      ['Barberini',41.9034,12.4881],['Repubblica',41.9009,12.4944],['Termini',41.9010,12.5016],
+      ['Vittorio Emanuele',41.8929,12.5117],['Manzoni',41.8896,12.5168],['San Giovanni',41.8859,12.5197],
+      ['Re di Roma',41.8788,12.5212],['Ponte Lungo',41.8714,12.5229],['Furio Camillo',41.8666,12.5230],
+      ['Colli Albani',41.8550,12.5310],['Anagnina',41.8389,12.5689]
+    ]
+  },
+  {
+    name:'Metro B', label:'Metro', color:'#00B050', weight:7,
+    stations:[
+      ['Rebibbia',41.9237,12.5631],['Ponte Mammolo',41.9182,12.5559],['Quintiliani',41.9116,12.5505],
+      ['Tiburtina',41.9013,12.5258],['Bologna',41.9081,12.5198],['Policlinico',41.9059,12.5147],
+      ['Castro Pretorio',41.9034,12.5072],['Termini',41.9010,12.5016],['Cavour',41.8939,12.4925],
+      ['Colosseo',41.8902,12.4922],['Circo Massimo',41.8857,12.4858],['Piramide',41.8758,12.4807],
+      ['Garbatella',41.8627,12.4881],['Basilica San Paolo',41.8568,12.4799],['EUR Magliana',41.8403,12.4615],
+      ['Laurentina',41.8273,12.4660]
+    ]
+  },
+  {
+    name:'Linea C', label:'Linea C', color:'#78C800', weight:7,
+    stations:[
+      ['Monte Compatri',41.8348,12.7283],['Pantano',41.8527,12.7048],['Grotte Celoni',41.8627,12.6347],
+      ['Torre Angela',41.8722,12.6122],['Torre Maura',41.8783,12.5970],['Giardinetti',41.8838,12.5839],
+      ['Alessandrino',41.8854,12.5688],['Lodi',41.8807,12.5421],['San Giovanni',41.8859,12.5197],
+      ['Colosseo',41.8902,12.4922]
+    ]
+  },
+  {
+    name:'Tram 2', label:'Tram', color:'#F2C12E', weight:5,
+    stations:[
+      ['Flaminio',41.9119,12.4763],['Viale Tiziano',41.9290,12.4802],['Auditorium',41.9285,12.4873],
+      ['Tor di Quinto',41.9476,12.4838]
+    ]
+  },
+  {
+    name:'Tram 3', label:'Tram', color:'#F2C12E', weight:5,
+    stations:[
+      ['Porta Maggiore',41.8930,12.5174],['Colosseo',41.8902,12.4922],['Bocca della Verità',41.8825,12.4812],
+      ['Trastevere',41.8812,12.4714],['Piazza Risorgimento',41.9043,12.4572]
+    ]
+  },
+  {
+    name:'FL1 Ferrovia', label:'', color:'#E84040', weight:5,
+    stations:[
+      ['Fiumicino Aero.',41.8003,12.2388],['Trastevere',41.8724,12.4655],['Ostiense',41.8731,12.4803],
+      ['Tuscolana',41.8762,12.5148],['Tiburtina',41.9013,12.5258],['Nomentana',41.9218,12.5603]
+    ]
+  }
+];
+
+function midLatLng(latlngs){
+  const i = Math.floor(latlngs.length/2);
+  return latlngs[i];
+}
+
+function renderExisting(){
+  const group = L.layerGroup();
+  existingLines.forEach(line=>{
+    const latlngs = line.stations.map(s=>[s[1],s[2]]);
+    const w = line.weight || 6;
+    // Outline (dark halo per leggibilità su mappa scura)
+    L.polyline(latlngs, {color:'rgba(0,0,0,0.35)', weight:w+3, opacity:1, lineCap:'round'}).addTo(group);
+    // Linea colorata
+    const poly = L.polyline(latlngs, {color:line.color, weight:w, opacity:1, lineCap:'round'}).addTo(group);
+
+    // Etichetta inline lungo il percorso, stile Apple Maps
+    if(line.label){
+      const mid = midLatLng(latlngs);
+      L.marker(mid, {
+        icon: L.divIcon({
+          className:'line-label',
+          html:`<span style="background:${line.color};color:#fff;padding:2px 7px;border-radius:20px;font-family:'Inter',sans-serif;font-weight:700;font-size:11px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.5);">${line.label}</span>`,
+          iconAnchor:[30,10]
+        })
+      }).addTo(group);
+    }
+
+    // Stazioni: pallini bianchi con bordo colorato
+    line.stations.forEach(s=>{
+      const isTerminal = s === line.stations[0] || s === line.stations[line.stations.length-1];
+      L.circleMarker([s[1],s[2]], {
+        radius: isTerminal ? 6 : 4,
+        color: line.color,
+        weight: isTerminal ? 3 : 2,
+        fillColor:'#ffffff',
+        fillOpacity: 1
+      }).addTo(group)
+        .bindPopup(`<div class="popup-title">${s[0]}</div><div class="popup-sub">${line.name} · esistente</div>`);
+    });
+  });
+  return group;
+}
+let existingLayer = renderExisting();
+existingLayer.addTo(map);
+
+/* ================= FUTURE LINES — persisted via window.storage ================= */
+const PALETTE = ['#3B9CFF','#FF6B5E','#34D399','#A78BFA','#FBBF24','#F472B6','#22D3EE','#FB923C'];
+let futureLines = [];
+let futureLayer = L.layerGroup().addTo(map);
+let drawing = null;
+let activeLineId = null;
+
+async function loadFutureLines(){
+  try{
+    const raw = localStorage.getItem('roma2040:lines');
+    futureLines = raw ? JSON.parse(raw) : [];
+  }catch(e){ futureLines = []; }
+  renderFuture();
+  renderLineList();
+}
+
+async function saveFutureLines(){
+  try{
+    localStorage.setItem('roma2040:lines', JSON.stringify(futureLines));
+  }catch(e){ console.error('Errore salvataggio', e); }
+}
+
+function nextColor(){
+  return PALETTE[futureLines.length % PALETTE.length];
+}
+
+function renderFuture(){
+  futureLayer.clearLayers();
+  if(!document.getElementById('toggleFuture').checked) return;
+  futureLines.forEach(line=>{
+    const latlngs = line.stations.map(s=>[s.lat,s.lng]);
+    const dim = activeLineId!==null && activeLineId!==line.id;
+    if(latlngs.length>1){
+      // outline
+      L.polyline(latlngs, {color:'rgba(0,0,0,0.3)', weight:10, opacity: dim?0.1:1, lineCap:'round'}).addTo(futureLayer);
+      // linea tratteggiata colorata
+      L.polyline(latlngs, {
+        color:line.color, weight:7, opacity: dim?0.15:1,
+        dashArray:'14 8', lineCap:'round'
+      }).addTo(futureLayer);
+      // etichetta inline
+      if(!dim){
+        const mid = midLatLng(latlngs);
+        L.marker(mid, {
+          icon: L.divIcon({
+            className:'line-label',
+            html:`<span style="background:${line.color};color:#fff;padding:2px 7px;border-radius:20px;font-family:'Inter',sans-serif;font-weight:700;font-size:11px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.5);opacity:0.9;">${line.name}</span>`,
+            iconAnchor:[30,10]
+          })
+        }).addTo(futureLayer);
+      }
+    }
+    line.stations.forEach((s)=>{
+      const marker = L.circleMarker([s.lat,s.lng], {
+        radius:5, color:line.color, weight:2.5,
+        fillColor:'#ffffff',
+        fillOpacity: dim?0.15:1,
+        className:'station-marker'
+      }).addTo(futureLayer);
+      marker.bindPopup(`<div class="popup-title">${s.name}</div><div class="popup-sub">${line.name} · futura</div>`);
+    });
+  });
+}
+
+let drawLayer = L.layerGroup().addTo(map);
+function renderDrawing(){
+  drawLayer.clearLayers();
+  if(!drawing) return;
+  const latlngs = drawing.stations.map(s=>[s.lat,s.lng]);
+  if(latlngs.length>1){
+    L.polyline(latlngs, {color:'rgba(0,0,0,0.3)', weight:10, lineCap:'round'}).addTo(drawLayer);
+    L.polyline(latlngs, {color:drawing.color, weight:7, opacity:1, dashArray:'14 8', lineCap:'round'}).addTo(drawLayer);
+  }
+  drawing.stations.forEach((s,i)=>{
+    L.circleMarker([s.lat,s.lng], {
+      radius:5, color:drawing.color, weight:2.5, fillColor:'#ffffff', fillOpacity:1, className:'station-marker'
+    }).addTo(drawLayer).bindTooltip(`${i+1}. ${s.name}`, {permanent:false});
+  });
+}
+
+/* ================= MAP CLICK -> add station while drawing ================= */
+map.on('click', (e)=>{
+  if(!drawing) return;
+  const idx = drawing.stations.length + 1;
+  const name = `Stazione ${idx}`;
+  drawing.stations.push({lat:e.latlng.lat, lng:e.latlng.lng, name});
+  renderDrawing();
+  document.getElementById('drawBannerText').textContent = `${drawing.stations.length} stazioni · tocca per aggiungere`;
+});
+
+/* ================= UI: start / finish drawing ================= */
+const newLineBtn = document.getElementById('newLineBtn');
+const drawBanner = document.getElementById('drawBanner');
+const finishDrawBtn = document.getElementById('finishDrawBtn');
+
+newLineBtn.addEventListener('click', ()=>{
+  if(drawing){ cancelDrawing(); return; }
+  closeSheet();
+  const id = 'line_' + Date.now();
+  drawing = { id, name: `Nuova linea ${futureLines.length+1}`, color: nextColor(), stations: [] };
+  drawBanner.classList.add('show');
+  document.getElementById('drawBannerText').textContent = 'Tocca la mappa per aggiungere stazioni';
+  newLineBtn.textContent = '✕ Annulla';
+  newLineBtn.classList.add('drawing');
+});
+
+function cancelDrawing(){
+  drawing = null;
+  drawLayer.clearLayers();
+  drawBanner.classList.remove('show');
+  newLineBtn.textContent = '+ Nuova linea';
+  newLineBtn.classList.remove('drawing');
+}
+
+finishDrawBtn.addEventListener('click', async ()=>{
+  if(!drawing) return;
+  if(drawing.stations.length < 2){
+    alert('Aggiungi almeno 2 stazioni prima di terminare la linea.');
+    return;
+  }
+  futureLines.push(drawing);
+  activeLineId = drawing.id;
+  drawing = null;
+  drawLayer.clearLayers();
+  drawBanner.classList.remove('show');
+  newLineBtn.textContent = '+ Nuova linea';
+  newLineBtn.classList.remove('drawing');
+  await saveFutureLines();
+  renderFuture();
+  renderLineList();
+  openSheet();
+  openLineEditor(futureLines[futureLines.length-1]);
+});
+
+/* ================= Bottom sheet open/close ================= */
+const sheet = document.getElementById('sheet');
+const sheetBackdrop = document.getElementById('sheetBackdrop');
+function openSheet(){ sheet.classList.add('open'); sheetBackdrop.classList.add('open'); }
+function closeSheet(){ sheet.classList.remove('open'); sheetBackdrop.classList.remove('open'); closeLineEditor(); }
+document.getElementById('openSheetBtn').addEventListener('click', ()=>{
+  sheet.classList.contains('open') ? closeSheet() : openSheet();
+});
+sheetBackdrop.addEventListener('click', closeSheet);
+
+// drag-to-close on handle
+let dragStartY = null;
+sheet.querySelector('.sheet-handle').addEventListener('touchstart', (e)=>{ dragStartY = e.touches[0].clientY; });
+sheet.querySelector('.sheet-handle').addEventListener('touchend', (e)=>{
+  if(dragStartY!==null && e.changedTouches[0].clientY - dragStartY > 40) closeSheet();
+  dragStartY = null;
+});
+
+/* ================= Line list panel ================= */
+function renderLineList(){
+  const container = document.getElementById('lineList');
+  const emptyHint = document.getElementById('emptyHint');
+  if(futureLines.length===0){
+    container.innerHTML = '';
+    emptyHint.style.display = 'block';
+    return;
+  }
+  emptyHint.style.display = 'none';
+  container.innerHTML = '';
+  futureLines.forEach(line=>{
+    const row = document.createElement('div');
+    row.className = 'line-chip' + (activeLineId===line.id ? ' active' : '');
+    row.innerHTML = `
+      <span class="chip-swatch" style="background:${line.color}; color:${line.color};"></span>
+      <span class="chip-name" title="${line.name}">${line.name}</span>
+      <span class="chip-count">${line.stations.length} st.</span>
+      <button class="chip-del" title="Elimina linea">✕</button>
+    `;
+    row.addEventListener('click', (ev)=>{
+      if(ev.target.classList.contains('chip-del')) return;
+      activeLineId = activeLineId===line.id ? null : line.id;
+      renderFuture();
+      renderLineList();
+      if(activeLineId) openLineEditor(line); else closeLineEditor();
+    });
+    row.querySelector('.chip-del').addEventListener('click', async (ev)=>{
+      ev.stopPropagation();
+      if(!confirm(`Eliminare "${line.name}"?`)) return;
+      futureLines = futureLines.filter(l=>l.id!==line.id);
+      if(activeLineId===line.id) activeLineId=null;
+      await saveFutureLines();
+      renderFuture();
+      renderLineList();
+      closeLineEditor();
+    });
+    container.appendChild(row);
+  });
+}
+
+/* ================= Inline line editor ================= */
+let editorEl = null;
+function closeLineEditor(){ if(editorEl){ editorEl.remove(); editorEl = null; } }
+function openLineEditor(line){
+  closeLineEditor();
+  editorEl = document.createElement('div');
+  editorEl.className = 'section';
+  editorEl.innerHTML = `
+    <p class="panel-label">Modifica linea</p>
+    <div class="field">
+      <label>Nome linea</label>
+      <input type="text" id="editName" value="${line.name.replace(/"/g,'&quot;')}">
+    </div>
+    <div class="field">
+      <label>Colore</label>
+      <div class="swatches" id="editSwatches"></div>
+    </div>
+    <div class="field">
+      <label>Stazioni (in ordine)</label>
+      <div id="editStations"></div>
+    </div>
+    <button class="btn btn-ghost" id="closeEditorBtn">Chiudi editor</button>
+  `;
+  document.getElementById('sheet').querySelector('.sheet-scroll').appendChild(editorEl);
+
+  const swatchWrap = editorEl.querySelector('#editSwatches');
+  PALETTE.forEach(c=>{
+    const sw = document.createElement('div');
+    sw.className = 'swatch-opt' + (line.color===c ? ' selected':'');
+    sw.style.background = c; sw.style.color = c;
+    sw.addEventListener('click', async ()=>{
+      line.color = c;
+      swatchWrap.querySelectorAll('.swatch-opt').forEach(el=>el.classList.remove('selected'));
+      sw.classList.add('selected');
+      await saveFutureLines();
+      renderFuture(); renderLineList();
+    });
+    swatchWrap.appendChild(sw);
+  });
+
+  editorEl.querySelector('#editName').addEventListener('change', async (e)=>{
+    line.name = e.target.value || line.name;
+    await saveFutureLines();
+    renderFuture(); renderLineList();
+  });
+
+  const stationsWrap = editorEl.querySelector('#editStations');
+  line.stations.forEach((s, i)=>{
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.style.marginBottom = '8px';
+    row.innerHTML = `<input type="text" value="${s.name.replace(/"/g,'&quot;')}" data-idx="${i}">`;
+    row.querySelector('input').addEventListener('change', async (e)=>{
+      line.stations[i].name = e.target.value || line.stations[i].name;
+      await saveFutureLines();
+      renderFuture();
+    });
+    stationsWrap.appendChild(row);
+  });
+
+  editorEl.querySelector('#closeEditorBtn').addEventListener('click', ()=>{
+    activeLineId = null;
+    closeLineEditor();
+    renderFuture();
+    renderLineList();
+  });
+}
+
+/* ================= Toggles ================= */
+document.getElementById('toggleExisting').addEventListener('change', (e)=>{
+  if(e.target.checked) existingLayer.addTo(map);
+  else map.removeLayer(existingLayer);
+});
+document.getElementById('toggleFuture').addEventListener('change', renderFuture);
+
+/* ================= Init ================= */
+loadFutureLines();
+</script>
+</body>
+</html>
